@@ -1,4 +1,4 @@
-"""离线契约测试；合成卡片不是已验证的真实 RNote 响应。"""
+"""离线契约测试；包含按真实响应字段构造的匿名 fixture。"""
 import io
 import json
 import os
@@ -23,6 +23,28 @@ def page(items, next_page=None):
 
 
 class RNoteTests(unittest.TestCase):
+    def test_live_note_shape(self):
+        raw = {'model_type': 'note', 'note': {
+            'id': 'fixture-note', 'title': '测试笔记', 'desc': '测试摘要',
+            'user': {'userid': 'fixture-author', 'nickname': '测试作者'},
+            'timestamp': 1788948048,
+            'images_list': [{'url': '', 'url_size_large': 'https://example.com/cover.jpg'}],
+            'liked_count': 8222, 'collected_count': 3931,
+            'comments_count': 70, 'shared_count': 354,
+        }}
+        result = rnote_api.normalize_item(raw)
+        self.assertEqual(result['id'], 'fixture-note')
+        self.assertEqual(result['authorId'], 'fixture-author')
+        self.assertEqual(result['interactiveCount'], 12577)
+        self.assertEqual(result['createTime'], '2026-09-09T10:00:48+00:00')
+        self.assertEqual(result['cover'], 'https://example.com/cover.jpg')
+        self.assertIsNone(result['authorFans'])
+        self.assertEqual(result['shareInfoLink'], '')
+
+    def test_invalid_timestamp_is_missing(self):
+        self.assertIsNone(rnote_api.publish_time({'timestamp': 1e100}))
+        self.assertIsNone(rnote_api.publish_time({'timestamp': True}))
+
     def test_request_contract_and_auth(self):
         payload = {'success': True, 'data': {'data': {'items': []}}}
         with patch.dict(os.environ, {'RNOTE_API_KEY': 'test-only-key'}), patch(
@@ -30,6 +52,7 @@ class RNoteTests(unittest.TestCase):
             rnote_api.request('search/notes', {'keyword': '通勤穿搭', 'time_filter': '一周内'})
         req = call.call_args.args[0]
         self.assertEqual(req.get_header('X-api-key'), 'test-only-key')
+        self.assertEqual(req.get_header('User-agent'), 'creator-buddy/1.0 (RNote API client)')
         self.assertEqual(req.get_method(), 'GET')
         self.assertIn('/api/v2/crawler/search/notes?', req.full_url)
         self.assertNotIn('test-only-key', req.full_url)

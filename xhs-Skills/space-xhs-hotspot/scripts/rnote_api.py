@@ -5,6 +5,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 
 
 SORT_TYPES = ('general', 'time_descending', 'popularity_descending',
@@ -20,7 +21,8 @@ def request(path, params, debug=False):
     url = 'https://rnote.dev/api/v2/crawler/' + path
     req = urllib.request.Request(
         url + '?' + urllib.parse.urlencode(params),
-        headers={'X-API-Key': key, 'Accept': 'application/json'})
+        headers={'X-API-Key': key, 'Accept': 'application/json',
+                 'User-Agent': 'creator-buddy/1.0 (RNote API client)'})
     if debug:
         print(f'RNote GET {path}（不输出凭证、会话或原始响应）', file=sys.stderr)
     try:
@@ -58,13 +60,26 @@ def count(value):
     return int(text) if text.isdigit() else (str(value) if text else None)
 
 
+def publish_time(card):
+    explicit = first(card, 'publish_time', 'time', 'create_time')
+    if explicit is not None:
+        return explicit
+    timestamp = card.get('timestamp')
+    if not isinstance(timestamp, (int, float)) or isinstance(timestamp, bool):
+        return None
+    try:
+        return datetime.fromtimestamp(timestamp, timezone.utc).isoformat()
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
 def normalize_item(item):
     if not isinstance(item, dict):
         return None
     model = first(item, 'model_type', 'modelType')
     if model and model not in ('note', 'normal', 'video'):
         return None
-    card = first(item, 'note_card', 'noteCard') or item
+    card = first(item, 'note', 'note_card', 'noteCard') or item
     if not isinstance(card, dict):
         return None
     note_id = first(item, 'id', 'note_id') or first(card, 'note_id', 'id')
@@ -87,14 +102,17 @@ def normalize_item(item):
         total = sum(counters.values())
     cover = card.get('cover') or {}
     cover_url = first(cover, 'url_default', 'url', 'url_pre') if isinstance(cover, dict) else cover
+    images = card.get('images_list') or []
+    if not cover_url and isinstance(images, list) and images and isinstance(images[0], dict):
+        cover_url = images[0].get('url_size_large') or images[0].get('url')
     link = first(item, 'note_url', 'noteLink', 'share_url', 'url')
     link = link or first(card, 'note_url', 'noteLink', 'share_url', 'url')
     return {
         'id': str(note_id), 'title': str(title), 'desc': card.get('desc') or '',
-        'authorId': first(user, 'user_id', 'userId', 'id') or '',
+        'authorId': first(user, 'user_id', 'userId', 'userid', 'id') or '',
         'authorNickname': first(user, 'nickname', 'nick_name') or '',
         'authorFans': count(first(user, 'fans', 'fans_count', 'fansCount')),
-        'createTime': first(card, 'publish_time', 'time', 'create_time'),
+        'createTime': publish_time(card),
         'shareInfoLink': link or '', 'cover': cover_url or '',
         'interactiveCount': total, **counters,
     }

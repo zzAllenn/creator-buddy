@@ -29,6 +29,7 @@ python3 scripts/fetch_xhs_hot_articles.py --provider rnote --keyword "AI 工具"
 python3 scripts/fetch_xhs_hot_articles.py --provider rnote --keyword "通勤穿搭" --page-num 2 --search-id '<searchId>' --search-session-id '<searchSessionId>'
 ```
 
+- 请求头使用 `User-Agent: creator-buddy/1.0 (RNote API client)`；实测默认 Python User-Agent 被 Cloudflare 以 403 拦截，该错误不能归因于 Key 无效。
 - 认证：`X-API-Key`；接口前缀 `https://rnote.dev/api/v2/crawler/`。
 - 搜索：`GET search/notes`，`keyword` 必填。`page` 从 1 开始；第一页返回 `data.search_id`、`data.search_session_id`，翻页必须都带上。
 - 排序 `--sort-type`：`general / time_descending / popularity_descending / comment_descending / collect_descending`。默认最多点赞，不能说成最多总互动。
@@ -39,7 +40,7 @@ python3 scripts/fetch_xhs_hot_articles.py --provider rnote --keyword "通勤穿�
 - 多词分别查询、分别落盘；逗号在 RNote 中只是关键词文本，不是批量搜索协议。
 - 无关键词的热点灵感接口 `creator/hot/inspiration/feed` 返回的是选题数组，不能直接当作笔记互动榜；当前脚本只接搜索及推荐词，空关键词明确拒绝。
 
-**输出与缺失字段**：读取 `data.data.items`，过滤推荐模块；兼容常见 `note_card / noteCard` 卡片及扁平字段。文档未定义卡片的完整 schema，映射须用实际账号响应继续校验；不识别的结构明确报错，不伪装成零样本。统一输出仍为 `items[]`，带 `source=rnote`、`timeFilter`、`sortType`、`pagesFetched`、`nextPage`、`searchId`、`searchSessionId`、`warnings`。`total` 是本次取样去重后的数量，不是全站命中数。
+**输出与缺失字段**：读取 `data.data.items`，过滤推荐模块。2026-09-12 真实搜索确认笔记位于 `items[].note`：`user.userid` 为作者 ID，`timestamp` 为秒级发布时间，转换为 UTC ISO 8601；封面来自 `images_list[0]`。同时兼容 `note_card / noteCard` 和扁平字段；不识别的结构明确报错，不伪装成零样本。统一输出仍为 `items[]`，带 `source=rnote`、`timeFilter`、`sortType`、`pagesFetched`、`nextPage`、`searchId`、`searchSessionId`、`warnings`。`total` 是本次取样去重后的数量，不是全站命中数。
 
 数值保留接口精度（`1.2万` 等近似字符串仍保留），缺失字段为 `null`；只有四类互动齐全且精确时才求和，否则总互动保留缺失。没有三维评分，不以 0 代替；粉丝数和发布时间缺失时不判断账号量级或时间趋势。完整 URL 原样保留；若接口仅返回 ID/token，`noteLink` 留空并告知链接缺失，不能臆造可访问链接。
 

@@ -36,7 +36,7 @@
 | noteLink | 原始完整笔记 URL；未提供时空串，不能自行通过 ID 拼接 |
 | authorId / authorNickname / authorLink | 作者及主页 |
 | authorFans | 粉丝数，缺失为 null；红狐保留原模糊展示 |
-| createTime | 原始发布时间，未返回时缺失，不从 ID 推断 |
+| createTime | 发布时间；RNote timestamp 秒值转为 UTC ISO 8601，其他时间字段保留原值；未返回时缺失，不从 ID 推断 |
 | likedCount / collectedCount / commentsCount / sharedCount | 赞/藏/评/分享；RNote 保留数值或近似字符串，缺失为 null |
 | interactiveCount | 上游总互动数；RNote 仅在四项均为精确数值时可求和，缺字段不当零 |
 | totalScore / relevanceScore / popularityScore / recencyScore | 仅红狐关键词搜索提供，RNote 不输出伪造评分 |
@@ -49,4 +49,4 @@
 
 ## 接口依据
 
-[RNote OpenAPI](https://rnote.dev/openapi.json) 与 [文档](https://rnote.dev/docs)，核对日期 2026-09-12。卡片完整字段没有公开响应 schema，适配已覆盖常见嵌套/扁平形态，仍需配置 Key 后用真实返回确认。
+[RNote OpenAPI](https://rnote.dev/openapi.json) 与 [文档](https://rnote.dev/docs)，核对日期 2026-09-12。已完成真实搜索联调，确认 `items[].note`、`user.userid`、秒级 `timestamp` 和 `images_list` 字段；实测有赞/藏/评/分享数，未返回粉丝数或完整笔记 URL。保留其他常见嵌套/扁平形态兼容。
