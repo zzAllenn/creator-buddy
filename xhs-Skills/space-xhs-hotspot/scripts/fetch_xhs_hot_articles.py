@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 小红书热门笔记搜索脚本（支持 HTML 卡片布局输出）
-基于红狐数据API，支持关键词搜索、分页、时间筛选
+优先使用 RNote API，兼容红狐 API；支持关键词搜索、分页、时间筛选
 """
 
 import sys
@@ -10,6 +10,9 @@ import json
 import os
 import urllib.request
 import urllib.error
+from html import escape
+
+from rnote_api import fetch_rnote_notes, SORT_TYPES, TIME_FILTERS, NOTE_TYPES
 
 
 def parse_count(value):
@@ -50,7 +53,7 @@ def fuzzy_count(value):
     return f'{wan}w+'
 
 
-def fetch_xhs_hot_notes(keyword: str, debug: bool = False, max_retries: int = 3, 
+def fetch_redfox_notes(keyword: str, debug: bool = False, max_retries: int = 3,
                         start_date: str = None, end_date: str = None, 
                         page_num: int = 1, page_size: int = 50):
     """调用接口获取小红书热门笔记数据"""
@@ -146,6 +149,33 @@ def fetch_xhs_hot_notes(keyword: str, debug: bool = False, max_retries: int = 3,
     raise Exception(f"{last_error}（已尝试 {max_retries} 次）")
 
 
+def fetch_xhs_hot_notes(keyword, debug=False, max_retries=3, start_date=None,
+                        end_date=None, page_num=1, page_size=None, provider='auto',
+                        pages=1, sort_type=None, time_filter=None, note_type=None,
+                        search_id='', search_session_id='', with_related=False):
+    """按配置选择数据源，禁止静默忽略另一数据源不支持的筛选条件。"""
+    if provider == 'auto':
+        provider = 'rnote' if os.environ.get('RNOTE_API_KEY', '').strip() else 'redfox'
+    if provider == 'rnote':
+        if start_date or end_date or page_size is not None:
+            raise ValueError('RNote 不支持 start-date/end-date/page-size；请使用 '
+                             '--time-filter 一天内/一周内/半年内/不限 和 --pages。')
+        return fetch_rnote_notes(
+            keyword, debug=debug, page_num=page_num, pages=pages,
+            sort_type=sort_type or 'popularity_descending',
+            time_filter=time_filter or '一周内', note_type=note_type or '不限',
+            search_id=search_id, search_session_id=search_session_id,
+            with_related=with_related)
+    if provider != 'redfox':
+        raise ValueError('未知数据源。')
+    if pages != 1 or sort_type or time_filter or note_type or search_id or search_session_id or with_related:
+        raise ValueError('当前选择红狐；RNote 专用参数需要 --provider rnote。')
+    data = fetch_redfox_notes(keyword, debug, max_retries, start_date, end_date,
+                             page_num, page_size or 50)
+    data['source'] = 'redfox'
+    return data
+
+
 def get_cover_urls(data, max_items=10):
     """提取所有封面图URL"""
     urls = []
@@ -159,7 +189,7 @@ def get_cover_urls(data, max_items=10):
                 'title': title,
                 'note_id': note_id,
                 'cover_url': cover_url,
-                'link': item.get('shareInfoLink', f"https://www.xiaohongshu.com/explore/{note_id}")
+                'link': item.get('shareInfoLink', '')
             })
     return urls
 
@@ -176,9 +206,8 @@ def format_as_html(data: dict, max_items: int = 10, start_date: str = None):
     """
     格式化输出热门笔记数据（HTML 卡片布局）
     """
-    from datetime import datetime
     
-    keyword = data.get("keyword", "")
+    keyword = escape(data.get("keyword", ""))
     total = data.get("total", 0)
     is_full_site = not keyword or keyword.strip() == ""
     
@@ -208,21 +237,25 @@ def format_as_html(data: dict, max_items: int = 10, start_date: str = None):
                 pass
         return '--'
     
+    display_count = ((lambda v: '--' if v is None else escape(str(v)))
+                     if data.get('source') == 'rnote' else fuzzy_count)
+
     def generate_card(item, idx):
         """生成单个卡片 HTML"""
         
         note_id = item.get('id', '')
         author_id = item.get('authorId', '')
-        author_name = item.get('authorNickname', '未知')
-        fans = item.get('authorFans', 0)
+        author_name = escape(item.get('authorNickname') or '未知')
+        fans = item.get('authorFans')
         title = process_title(item)
         pub_time = format_time(item)
-        interactive_count = fuzzy_count(item.get('interactiveCount', 0))
-        like_count = fuzzy_count(item.get('likedCount', 0))
-        collect_count = fuzzy_count(item.get('collectedCount', 0))
+        interactive_count = display_count(item.get('interactiveCount'))
+        like_count = display_count(item.get('likedCount'))
+        collect_count = display_count(item.get('collectedCount'))
         
         # 作品链接
-        note_link = item.get('shareInfoLink') or f"https://www.xiaohongshu.com/explore/{note_id}"
+        note_link = item.get('shareInfoLink') or ''
+        note_link = escape(note_link, quote=True)
         # 作者主页链接
         author_link = f"https://www.xiaohongshu.com/user/profile/{author_id}" if author_id else "#"
         
@@ -233,7 +266,7 @@ def format_as_html(data: dict, max_items: int = 10, start_date: str = None):
 
         # 评分标签（全站热门时不展示）
         scores_html = ''
-        if not is_full_site:
+        if not is_full_site and data.get('source', 'redfox') == 'redfox':
             scores_html = f'''
             <div class="card-scores">
                 <span class="score-tag relevance">相关性 {relevance_score}</span>
@@ -242,14 +275,18 @@ def format_as_html(data: dict, max_items: int = 10, start_date: str = None):
             </div>
             '''
 
+        title_html = (f'<a href="{note_link}" class="card-title" target="_blank">{title}</a>'
+                      if note_link else f'<span class="card-title">{title}</span>')
+        view_html = (f'<a href="{note_link}" class="view-note-btn" target="_blank">查看作品 ↗</a>'
+                     if note_link else '<span class="view-note-btn">链接缺失</span>')
         card_html = f'''
         <div class="card">
             <div class="card-title-row">
                 <span class="card-index">{idx + 1}.</span>
-                <a href="{note_link}" class="card-title" target="_blank">{title}</a>
+                {title_html}
             </div>
             <div class="card-meta">
-                <a href="{author_link}" class="author-link" target="_blank">{author_name}（{fuzzy_count(fans)}粉）</a>
+                <a href="{author_link}" class="author-link" target="_blank">{author_name}（{display_count(fans)}粉）</a>
                 <span class="meta-divider">·</span>
                 <span class="pub-time">发布日期：{pub_time}</span>
             </div>
@@ -257,7 +294,7 @@ def format_as_html(data: dict, max_items: int = 10, start_date: str = None):
             <div class="card-stats">
                 <span class="interaction-count">🔥 {interactive_count}互动</span>
                 <span class="detail-stats">👍{like_count} ⭐{collect_count}</span>
-                <a href="{note_link}" class="view-note-btn" target="_blank">查看作品 ↗</a>
+                {view_html}
             </div>
         </div>
         '''
@@ -293,6 +330,10 @@ def format_as_html(data: dict, max_items: int = 10, start_date: str = None):
     
     time_range = f"近30天" if not start_date else f"从{start_date}起"
     
+    source_note = ('RNote 搜索样本；缺失字段显示 --' if data.get('source') == 'rnote'
+                   else '红狐爆款库；互动数为入库快照')
+    if data.get('source') == 'rnote':
+        time_range = data.get('timeFilter', '不限')
     html_content = f'''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -491,8 +532,8 @@ def format_as_html(data: dict, max_items: int = 10, start_date: str = None):
         {latest_hot_html}
         
         <div class="data-note">
-            数据来源：小红书热门笔记搜索，每日更新最新热门内容<br>
-            备注：互动数据为入库快照，实时数据可能持续增长
+            数据来源：{source_note}<br>
+            备注：结果为查询样本，不代表全站统计
         </div>
     </div>
 </body>
@@ -510,6 +551,7 @@ def format_as_json(data: dict, max_items: int = 10):
     is_full_site = not keyword or keyword.strip() == ""
     latest_hot_items = data.get("latestHotArticles", [])[:10]
     
+    count = (lambda value: value) if data.get('source') == 'rnote' else fuzzy_count
     result = []
     for item in top_items:
         note_id = item.get('id', '')
@@ -519,18 +561,18 @@ def format_as_json(data: dict, max_items: int = 10):
             'desc': item.get('desc', ''),
             'authorId': item.get('authorId', ''),
             'authorNickname': item.get('authorNickname', ''),
-            'authorFans': fuzzy_count(item.get('authorFans', 0)),
+            'authorFans': count(item.get('authorFans')),
             'createTime': item.get('createTime', ''),
-            'noteLink': item.get('shareInfoLink') or f"https://www.xiaohongshu.com/explore/{note_id}",
+            'noteLink': item.get('shareInfoLink') or '',
             'authorLink': f"https://www.xiaohongshu.com/user/profile/{item.get('authorId', '')}" if item.get('authorId') else '',
-            'interactiveCount': fuzzy_count(item.get('interactiveCount', 0)),
-            'likedCount': fuzzy_count(item.get('likedCount', 0)),
-            'collectedCount': fuzzy_count(item.get('collectedCount', 0)),
-            'commentsCount': fuzzy_count(item.get('commentsCount', 0)),
-            'sharedCount': fuzzy_count(item.get('sharedCount', 0)),
+            'interactiveCount': count(item.get('interactiveCount')),
+            'likedCount': count(item.get('likedCount')),
+            'collectedCount': count(item.get('collectedCount')),
+            'commentsCount': count(item.get('commentsCount')),
+            'sharedCount': count(item.get('sharedCount')),
         }
         # 有关键词时才输出评分字段
-        if not is_full_site:
+        if not is_full_site and data.get('source', 'redfox') == 'redfox':
             item_data['totalScore'] = item.get('totalScore', 0)
             item_data['relevanceScore'] = item.get('relevanceScore', 0)
             item_data['popularityScore'] = item.get('popularityScore', 0)
@@ -545,16 +587,18 @@ def format_as_json(data: dict, max_items: int = 10):
             'noteId': note_id,
             'title': item.get('title', '') or item.get('desc', '')[:50],
             'authorNickname': item.get('authorNickname', ''),
-            'authorFans': fuzzy_count(item.get('authorFans', 0)),
+            'authorFans': count(item.get('authorFans')),
             'createTime': item.get('createTime', ''),
-            'noteLink': item.get('shareInfoLink') or f"https://www.xiaohongshu.com/explore/{note_id}",
+            'noteLink': item.get('shareInfoLink') or '',
             'authorLink': f"https://www.xiaohongshu.com/user/profile/{item.get('authorId', '')}" if item.get('authorId') else '',
-            'interactiveCount': fuzzy_count(item.get('interactiveCount', 0)),
-            'likedCount': fuzzy_count(item.get('likedCount', 0)),
-            'collectedCount': fuzzy_count(item.get('collectedCount', 0)),
+            'interactiveCount': count(item.get('interactiveCount')),
+            'likedCount': count(item.get('likedCount')),
+            'collectedCount': count(item.get('collectedCount')),
         })
 
     return {
+        **{k: v for k, v in data.items() if k not in {'articles', 'latestHotArticles'}},
+        'source': data.get('source', 'redfox'),
         'keyword': data.get('keyword', ''),
         'total': data.get('total', 0),
         'pageNum': data.get('pageNum', 1),
@@ -582,13 +626,26 @@ def main():
                        help='结束日期，格式 yyyy-MM-dd')
     parser.add_argument('--page-num', type=int, default=1,
                        help='页码（默认1）')
-    parser.add_argument('--page-size', type=int, default=50,
-                       help='每页条数（默认50）')
+    parser.add_argument('--page-size', type=int, default=None,
+                       help='仅红狐：每页条数（默认50）')
     parser.add_argument('--debug', action='store_true', help='启用调试模式')
     parser.add_argument('--max-retries', type=int, default=3, 
-                       help='最大重试次数（默认3次）')
+                       help='仅红狐：最大重试次数（默认3次）；RNote 不自动重试')
     
+    parser.add_argument('--provider', choices=['auto', 'rnote', 'redfox'], default='auto',
+                        help='自动优先选已配置的 RNote，其次红狐；失败后由 skill 决定降级')
+    parser.add_argument('--pages', type=int, default=1, help='RNote 连续取样页数，默认 1')
+    parser.add_argument('--sort-type', choices=SORT_TYPES, help='RNote 默认最多点赞')
+    parser.add_argument('--time-filter', choices=TIME_FILTERS, help='RNote 默认一周内')
+    parser.add_argument('--note-type', choices=NOTE_TYPES, help='RNote 默认不限')
+    parser.add_argument('--search-id', default='', help='RNote 翻页搜索 ID')
+    parser.add_argument('--search-session-id', default='', help='RNote 翻页会话 ID')
+    parser.add_argument('--with-related', action='store_true', help='额外请求 RNote 推荐词（按次计费）')
     args = parser.parse_args()
+    if args.max_items < 1 or args.page_num < 1 or args.pages < 1 or args.max_retries < 1:
+        parser.error('数量、页码和重试次数必须大于 0')
+    if args.page_size is not None and not 1 <= args.page_size <= 50:
+        parser.error('红狐 page-size 范围为 1~50')
     
     try:
         data = fetch_xhs_hot_notes(
@@ -598,7 +655,10 @@ def main():
             start_date=args.start_date,
             end_date=args.end_date,
             page_num=args.page_num,
-            page_size=args.page_size
+            page_size=args.page_size, provider=args.provider, pages=args.pages,
+            sort_type=args.sort_type, time_filter=args.time_filter, note_type=args.note_type,
+            search_id=args.search_id, search_session_id=args.search_session_id,
+            with_related=args.with_related
         )
         
         # 生成 JSON 数据（始终输出到 stdout，供智能体读取）
@@ -607,15 +667,16 @@ def main():
         # 输出 JSON 到 stdout（智能体从此读取结构化数据）
         print(json.dumps(json_data, ensure_ascii=False, indent=2))
         
-        # 同时生成 HTML 文件
-        html_content = format_as_html(data, max_items=args.max_items, start_date=args.start_date)
-        keyword_safe = args.keyword.replace('"', '').replace(' ', '_') or '全站热门'
-        html_file = args.output_file or f"{keyword_safe}_热门数据.html"
-        with open(html_file, 'w', encoding='utf-8') as f:
-            f.write(html_content)
-        
-        # 统计信息输出到 stderr
-        print(f"✓ HTML 结果已保存到: {html_file}", file=sys.stderr)
+        if args.output_format == 'html' or args.output_file:
+            html_content = format_as_html(data, max_items=args.max_items, start_date=args.start_date)
+            keyword_safe = ''.join(c if c.isalnum() else '_' for c in args.keyword) or '全站热门'
+            html_file = args.output_file or f"{keyword_safe}_热门数据.html"
+            with open(html_file, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            print(f"✓ HTML 结果已保存到: {html_file}", file=sys.stderr)
+        print(f"✓ 数据源: {json_data['source']}", file=sys.stderr)
+        for warning in data.get('warnings', []):
+            print(f"提示: {warning}", file=sys.stderr)
         print(f"✓ 关键词: {args.keyword}", file=sys.stderr)
         print(f"✓ 总条数: {json_data['total']} 条", file=sys.stderr)
         print(f"✓ 筛选结果: {len(json_data['items'])} 条", file=sys.stderr)

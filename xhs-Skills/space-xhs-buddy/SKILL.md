@@ -100,12 +100,13 @@ note-analytics ──┤
 `hotspot` 和 `account-audit` 的量化能力依赖 API Key。第一次为某个用户服务时先探一次，避免走到一半才发现拿不到数据：
 
 ```bash
-env | grep -E '^(REDFOX_API_KEY|SOCIALDATAX_API_KEY|GUAIKEI_API_TOKEN)=' | sed 's/=.*/=<set>/'
+env | grep -E '^(RNOTE_API_KEY|REDFOX_API_KEY|SOCIALDATAX_API_KEY|GUAIKEI_API_TOKEN)=' | sed 's/=.*/=<set>/'
 ```
 
 | 状态 | 影响 |
 |---|---|
-| 有任一 Key | `hotspot` 能拉真实互动数据，`account-audit` 能量化分析 |
+| 仅 RNOTE_API_KEY | `hotspot` 可用 RNote 搜索；`account-audit` 尚未接入 RNote，走定性路径 |
+| 有原有三种 Key 任一 | `hotspot` 能拉真实互动数据，`account-audit` 能量化分析 |
 | 都没有 | 两者降级为 WebSearch / 截图定性路径，**仍可用**，但拿不到互动数。此时禁止编造互动量级，结论要标注"未经数据验证" |
 
 其余技能可直接使用。`xhs-html` 的 HTML 渲染链路依赖 playwright + 本机 Chrome，`note-analytics` 的表格处理依赖 pandas；`space-xhs-image` 直接调用 Codex 内置 `image_gen`，不需要 API Key 或外部生图后端。

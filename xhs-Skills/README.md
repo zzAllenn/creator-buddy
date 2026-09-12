@@ -34,12 +34,13 @@ cp -r creator-buddy/xhs-Skills/xhs-html ~/.claude/skills/
 除平台数据查询外，其余 Skill 不需要第三方 API Key。需要真实平台数据时配置任一：
 
 ```bash
+export RNOTE_API_KEY=...         # https://rnote.dev/docs   hotspot 首选：笔记搜索 + 推荐词
 export REDFOX_API_KEY=...        # https://redfox.hk        近 30 天爆款库，带三维评分
 export SOCIALDATAX_API_KEY=...   # https://socialdatax.com  近实时搜索
 export GUAIKEI_API_TOKEN=...     # https://www.guaikei.com  详情 + 评论 + 博主作品，拆号必需
 ```
 
-`hotspot` 和 `account-audit` 会**运行时探测并逐级降级**，三个都没有时走公开搜索兜底 —— 仍能跑完流程，只是拿不到互动数，且会明确标注"未经数据验证"，不靠猜补齐。
+`hotspot` 优先 RNote，再降级到红狐/socialdatax/怪壳；`account-audit` 仍使用原有数据源，只有 RNote Key 时不能自动量化拆号。各自没有可用 Key 时走公开搜索兜底 —— 仍能跑完流程，只是拿不到互动数，且会明确标注"未经数据验证"，不靠猜补齐。
 
 `space-xhs-image` 直接调用 Codex runtime 提供的内置 `image_gen`，不需要 `GOOGLE_API_KEY`、`OPENAI_API_KEY` 或其他外部生图后端。
 

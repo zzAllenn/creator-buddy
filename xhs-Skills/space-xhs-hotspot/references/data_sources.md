@@ -1,33 +1,71 @@
 # 数据源路线手册
 
-三条 API 路线 + 一条零配置兜底。执行前先探测环境变量，取第一条可用的；报错则降级到下一条。
+四条 API 路线 + 一条零配置兜底。执行前先探测环境变量，取第一条可用的；报错则降级到下一条。
 本文只记录在参考资料中**实际存在**的参数，未列出的参数不要臆造。
 
 ```bash
-env | grep -E '^(REDFOX_API_KEY|SOCIALDATAX_API_KEY|GUAIKEI_API_TOKEN)=' | sed 's/=.*/=<set>/'
+env | grep -E '^(RNOTE_API_KEY|REDFOX_API_KEY|SOCIALDATAX_API_KEY|GUAIKEI_API_TOKEN)=' | sed 's/=.*/=<set>/'
 ```
 
 ---
 
-## 路线 1：红狐 API（`REDFOX_API_KEY`）— 首选
+## 路线 1：RNote API（`RNOTE_API_KEY`）— 首选
+
+文档：[Swagger / OpenAPI](https://rnote.dev/docs)、[上手指南](https://rnote.dev/docs/guide)。2026-09-12 对照 OpenAPI v2 参数；指南部分搜索参数仍是旧写法，以 OpenAPI 的中文枚举和 `sort_type` 为准。
+
+```bash
+export RNOTE_API_KEY=...  # 在 RNote 管理后台创建，仅配置在本地环境
+
+# 默认一周内，最多点赞排序；stdout 为兼容分析器的 items[] JSON
+python3 scripts/fetch_xhs_hot_articles.py --keyword "通勤穿搭" > a.json
+
+# 多页取样；脚本自动携带搜索会话，按 note ID 去重
+python3 scripts/fetch_xhs_hot_articles.py --provider rnote --keyword "减脂餐" --pages 2 --max-items 30 --with-related
+
+# 查看最新图文笔记；推荐词为额外的按次计费请求，默认不查
+python3 scripts/fetch_xhs_hot_articles.py --provider rnote --keyword "AI 工具" --sort-type time_descending --note-type 普通笔记 --time-filter 一天内
+
+# 手动续页：仅在 nextPage 非空时，用同一关键词/排序/类型/时间范围和原始会话值
+python3 scripts/fetch_xhs_hot_articles.py --provider rnote --keyword "通勤穿搭" --page-num 2 --search-id '<searchId>' --search-session-id '<searchSessionId>'
+```
+
+- 认证：`X-API-Key`；接口前缀 `https://rnote.dev/api/v2/crawler/`。
+- 搜索：`GET search/notes`，`keyword` 必填。`page` 从 1 开始；第一页返回 `data.search_id`、`data.search_session_id`，翻页必须都带上。
+- 排序 `--sort-type`：`general / time_descending / popularity_descending / comment_descending / collect_descending`。默认最多点赞，不能说成最多总互动。
+- 类型 `--note-type`：`不限 / 视频笔记 / 普通笔记 / 直播笔记`。
+- 时间 `--time-filter`：`不限 / 一天内 / 一周内 / 半年内`，默认一周内。没有精确起止日期和 page_size；旧日期参数在 RNote 路线会报错，不静默忽略。
+- `--pages` 默认 1，按服务端 `next_page` 续页；`--max-items` 控制输出条数，不控制服务器页大小或计费。
+- `--with-related` 额外调用 `GET search/recommend`，保留返回的推荐词数组；失败仅记 warnings，不丢弃已成功搜索的笔记。
+- 多词分别查询、分别落盘；逗号在 RNote 中只是关键词文本，不是批量搜索协议。
+- 无关键词的热点灵感接口 `creator/hot/inspiration/feed` 返回的是选题数组，不能直接当作笔记互动榜；当前脚本只接搜索及推荐词，空关键词明确拒绝。
+
+**输出与缺失字段**：读取 `data.data.items`，过滤推荐模块；兼容常见 `note_card / noteCard` 卡片及扁平字段。文档未定义卡片的完整 schema，映射须用实际账号响应继续校验；不识别的结构明确报错，不伪装成零样本。统一输出仍为 `items[]`，带 `source=rnote`、`timeFilter`、`sortType`、`pagesFetched`、`nextPage`、`searchId`、`searchSessionId`、`warnings`。`total` 是本次取样去重后的数量，不是全站命中数。
+
+数值保留接口精度（`1.2万` 等近似字符串仍保留），缺失字段为 `null`；只有四类互动齐全且精确时才求和，否则总互动保留缺失。没有三维评分，不以 0 代替；粉丝数和发布时间缺失时不判断账号量级或时间趋势。完整 URL 原样保留；若接口仅返回 ID/token，`noteLink` 留空并告知链接缺失，不能臆造可访问链接。
+
+**错误与降级**：RNote 按请求计费，脚本不自动重试或切源（`--max-retries` 仅红狐使用）。401/403 检查 Key，402 检查余额，429/5xx 或网络故障按需重试；错误不回显原始响应或凭证。skill 在报错后按表选择下一条路线，并换用该路线支持的参数、声明实际数据源。仅有 RNote Key 时不能自动启用其他收费平台。
+
+---
+
+## 路线 2：红狐 API（`REDFOX_API_KEY`）— 兼容
 
 脚本：`scripts/fetch_xhs_hot_articles.py`（Python 3 标准库，无第三方依赖）。
-来源：`creator-buddy/skills/xhs-hotnotes/scripts/fetch_xhs_hot_articles.py`，原样复用未修改。
+保留原红狐查询协议；通过 `--provider redfox` 显式选择，避免已有 RNote Key 时选错路线。
 
 ### 命令
 
 ```bash
 # 关键词搜索（默认近 7 天：start-date 传 今天-7）
-python3 scripts/fetch_xhs_hot_articles.py --keyword "通勤穿搭" --start-date 2026-07-19
+python3 scripts/fetch_xhs_hot_articles.py --provider redfox --keyword "通勤穿搭" --start-date 2026-07-19
 
 # 全站热门（关键词传空串，返回不含评分字段）
-python3 scripts/fetch_xhs_hot_articles.py --keyword "" --start-date 2026-07-19
+python3 scripts/fetch_xhs_hot_articles.py --provider redfox --keyword "" --start-date 2026-07-19
 
 # 多关键词并行（逗号分隔，泛化词拓展后用这个）
-python3 scripts/fetch_xhs_hot_articles.py --keyword "通勤穿搭,老钱风,小个子显高" --start-date 2026-07-19
+python3 scripts/fetch_xhs_hot_articles.py --provider redfox --keyword "通勤穿搭,老钱风,小个子显高" --start-date 2026-07-19
 
 # 扩大取样
-python3 scripts/fetch_xhs_hot_articles.py --keyword "减脂餐" --start-date 2026-06-26 --max-items 30 --page-size 50
+python3 scripts/fetch_xhs_hot_articles.py --provider redfox --keyword "减脂餐" --start-date 2026-06-26 --max-items 30 --page-size 50
 ```
 
 ### 参数
@@ -48,7 +86,7 @@ python3 scripts/fetch_xhs_hot_articles.py --keyword "减脂餐" --start-date 202
 
 - **stdout = JSON**，这是要读的内容。
 - stderr = 统计信息 + 前 5 条封面图 URL（需要分析封面风格时可用）。
-- 副产物 = 当前目录下的 HTML 报告文件。**默认不用管它，也不用在回答里提**；用户明确要可视化报告时再指出路径。想避免污染工作目录就用 `--output-file` 指到临时目录。
+- 默认只输出 JSON；显式传 `--output-format html` 或 `--output-file` 时额外生成 HTML 报告。**默认不用管它，也不用在回答里提**；用户明确要可视化报告时再指出路径。想避免污染工作目录就用 `--output-file` 指到临时目录。
 
 stdout JSON 顶层字段：
 
@@ -72,14 +110,14 @@ stdout JSON 顶层字段：
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
-| `未找到 REDFOX_API_KEY` | 未配置 | 降级到路线 2 |
+| `未找到 REDFOX_API_KEY` | 未配置 | 降级到 socialdatax 路线 |
 | `HTTP请求失败: 状态码 401` | Key 无效/过期 | 提示重新获取 <https://redfox.hk/settings/api-keys>，本次降级 |
 | `API 错误: xxx` | 参数问题 | 检查日期格式 `yyyy-MM-dd`、`page-size` ≤ 50 |
-| 重试 3 次仍失败 | 网络 | 降级到路线 2 |
+| 重试 3 次仍失败 | 网络 | 降级到 socialdatax 路线 |
 
 ---
 
-## 路线 2：socialdatax CLI（`SOCIALDATAX_API_KEY`）
+## 路线 3：socialdatax CLI（`SOCIALDATAX_API_KEY`）
 
 近实时搜索，无评分，需自己按互动排序。详见 `xhs-content-research` skill。
 
@@ -108,14 +146,14 @@ npx -y socialdatax-skills@latest xhs search \
 
 **报错**：
 - 非余额类网络/API 异常 → 保留错误信息，核对 Key 与参数后原样重试一次。
-- `insufficient_balance` / "积分不足" → **不要重复重试**，把错误里的充值链接原样展示给用户，提示充值后重跑同一条命令；本次降级到路线 3 或兜底。
+- `insufficient_balance` / "积分不足" → **不要重复重试**，把错误里的充值链接原样展示给用户，提示充值后重跑同一条命令；本次降级到怪壳路线 或兜底。
 - 已充值仍报余额不足 → 确认环境变量里的 Key 与充值账号是否同一个。
 
 对应 MCP 工具：`xhs_search_notes`（传 `keyword`，可选 `page_token` / `sort_type` / `note_type` / `publish_time_range`；不传 `page`）。
 
 ---
 
-## 路线 3：怪壳 Node CLI（`GUAIKEI_API_TOKEN`）
+## 路线 4：怪壳 Node CLI（`GUAIKEI_API_TOKEN`）
 
 需 Node 16.14+。脚本位于 `xiaohongshu-content-tools` skill 目录，用绝对路径调用：
 
@@ -140,7 +178,7 @@ node $XT/src/xiaohongshu/post-cli.js --url "https://www.xiaohongshu.com/user/pro
 | `--time` `-i` | 0 全部（默认）/ 1 一天内 / 2 一周内 / 3 半年内 |
 | `--limit` `-l` | 搜索数量，默认 20；详情接口是评论数，默认 6；作品接口是作品数 |
 
-**这条路线的独占能力**：评论区和博主作品序列。做「互动结构」和「对标账号」分析时，即使路线 1 可用，也值得补跑一次 detail-cli 看评论。
+**这条 CLI 路线已集成的能力**：评论区和博主作品序列。做「互动结构」和「对标账号」分析时，即使路线 1 可用，也值得补跑一次 detail-cli 看评论。
 
 **限制**：仅公开数据；链接不含 `xsec_token` 会直接报错，短链 `https://xhslink.com/m/xxx` 自动兼容。
 

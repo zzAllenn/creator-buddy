@@ -8,7 +8,7 @@
 
 输入 = 已经落盘的 JSON 文件，本脚本不联网、不需要任何 API Key。
 支持两种输入格式，自动识别：
-  1. 红狐路线：scripts/fetch_xhs_hot_articles.py 的 stdout（含 items[]）
+  1. RNote / 红狐路线：scripts/fetch_xhs_hot_articles.py 的 stdout（含 items[]）
   2. 怪壳路线：xiaohongshu-content-tools/src/xiaohongshu/search-cli.js --output json（含 results[]）
 
 怪壳的 stdout 里会混入「查询任务重试 N/60 次」之类的日志行，本脚本会跳过
@@ -74,12 +74,21 @@ def load_json_loose(path: Path) -> Any:
 
 # ---------- 归一化 ----------
 
+def optional_count(value):
+    if value is None or str(value).strip() in ('', '--', '-', 'null'):
+        return None
+    text = str(value).strip().replace(',', '')
+    if not re.fullmatch(r'\d+(?:\.\d+)?[wW万千kK]?\+?', text):
+        return None
+    return parse_count(value)
+
+
 def normalize(obj: Any) -> tuple[list[dict[str, Any]], str]:
     """返回 (归一后的笔记列表, 识别到的路线名)。"""
     if isinstance(obj, list):
         raw_items, route = obj, "unknown"
     elif "items" in obj:
-        raw_items, route = obj.get("items") or [], "redfox"
+        raw_items, route = obj.get("items") or [], obj.get("source", "redfox")
     elif "results" in obj:
         raw_items, route = obj.get("results") or [], "guaikei"
     else:
@@ -90,19 +99,20 @@ def normalize(obj: Any) -> tuple[list[dict[str, Any]], str]:
         if not isinstance(it, dict):
             continue
         user = it.get("user") if isinstance(it.get("user"), dict) else {}
-        liked = parse_count(it.get("likedCount", it.get("liked_count")))
-        collected = parse_count(it.get("collectedCount", it.get("collected_count")))
-        commented = parse_count(it.get("commentsCount", it.get("comment_count")))
-        shared = parse_count(it.get("sharedCount", it.get("shared_count")))
-        interactive = parse_count(it.get("interactiveCount"))
-        if not interactive:
+        liked = optional_count(it.get("likedCount", it.get("liked_count")))
+        collected = optional_count(it.get("collectedCount", it.get("collected_count")))
+        commented = optional_count(it.get("commentsCount", it.get("comment_count")))
+        shared = optional_count(it.get("sharedCount", it.get("shared_count")))
+        interactive = optional_count(it.get("interactiveCount"))
+        if interactive is None and all(v is not None for v in (liked, collected, commented, shared)):
             interactive = liked + collected + commented + shared
         out.append({
+            "id": it.get("noteId") or it.get("id") or "",
             "title": str(it.get("title") or it.get("desc") or "").strip(),
             "desc": str(it.get("desc") or "")[:120],
             "url": it.get("noteLink") or it.get("url") or "",
             "author": it.get("authorNickname") or user.get("nickname") or "",
-            "fans": parse_count(it.get("authorFans")) if it.get("authorFans") else None,
+            "fans": optional_count(it.get("authorFans")),
             "publish": it.get("createTime") or it.get("publish_time") or "",
             "liked": liked,
             "collected": collected,
@@ -112,11 +122,13 @@ def normalize(obj: Any) -> tuple[list[dict[str, Any]], str]:
             "score": it.get("totalScore"),
             "route": route,
         })
-    # 去重：url 优先，其次标题
+    # RNote 保留请求排序；无 URL 时优先用笔记 ID 去重，避免同标题误合并。
     seen: set[str] = set()
     deduped: list[dict[str, Any]] = []
-    for it in sorted(out, key=lambda x: x["interactive"], reverse=True):
-        key = it["url"] or it["title"]
+    ordered = out if route == "rnote" else sorted(
+        out, key=lambda x: x["interactive"] if x["interactive"] is not None else (x["liked"] or 0), reverse=True)
+    for it in ordered:
+        key = it["id"] or it["url"] or it["title"]
         if not key or key in seen:
             continue
         seen.add(key)
@@ -215,26 +227,30 @@ def median(nums: list[int]) -> int:
 def summarize(label: str, items: list[dict[str, Any]], route: str, top: int) -> dict[str, Any]:
     items = items[:top]
     n = len(items)
-    inter = [i["interactive"] for i in items]
-    liked = sum(i["liked"] for i in items)
-    collected = sum(i["collected"] for i in items)
-    commented = sum(i["commented"] for i in items)
+    inter = [i["interactive"] for i in items if i["interactive"] is not None]
+    liked = sum(i["liked"] or 0 for i in items)
+    collected = sum(i["collected"] or 0 for i in items)
+    commented = sum(i["commented"] or 0 for i in items)
     fans = [i["fans"] for i in items if i["fans"] is not None]
+    top_note = max((i for i in items if i["interactive"] is not None),
+                   key=lambda i: i["interactive"], default=None)
     return {
         "label": label,
         "route": route,
         "n": n,
-        "interactive_median": median(inter),
-        "interactive_max": max(inter) if inter else 0,
-        "collect_like_ratio": round(collected / liked, 2) if liked else None,
-        "comment_like_ratio": round(commented / liked, 2) if liked else None,
+        "interactive_median": median(inter) if inter else None,
+        "interactive_known_count": len(inter),
+        "interactive_max": max(inter) if inter else None,
+        "collect_like_ratio": round(collected / liked, 2) if liked and all(i["liked"] is not None and i["collected"] is not None for i in items) else None,
+        "comment_like_ratio": round(commented / liked, 2) if liked and all(i["liked"] is not None and i["commented"] is not None for i in items) else None,
         "small_account_count": sum(1 for f in fans if f < 10000) if fans else None,
         "fans_known": bool(fans),
+        "fans_known_count": len(fans),
         "formats": distribution(items, FORMAT_RULES, single=True, use_desc=True),
         "hooks": distribution(items, HOOK_RULES, single=False),
         "words": title_words(items, label=label),
-        "top_note": ({"title": items[0]["title"], "url": items[0]["url"],
-                      "interactive": items[0]["interactive"]} if items else None),
+        "top_note": ({"title": top_note["title"], "url": top_note["url"],
+                      "interactive": top_note["interactive"]} if top_note else None),
     }
 
 
@@ -252,9 +268,9 @@ def render(summaries: list[dict[str, Any]], kind: str) -> str:
     for s in summaries:
         fmt = next(iter(s["formats"].items()), ("-", 0))
         hook = next(iter(s["hooks"].items()), ("-", 0))
-        small = "字段缺失" if not s["fans_known"] else f"{s['small_account_count']}/{s['n']}"
+        small = "字段缺失" if not s["fans_known"] else f"{s['small_account_count']}/{s['fans_known_count']}"
         lines.append(
-            f"| {s['label']} | {s['n']} | {s['interactive_median']} | {s['interactive_max']} | "
+            f"| {s['label']} | {s['n']} | {s['interactive_median'] if s['interactive_median'] is not None else '-'} | {s['interactive_max'] if s['interactive_max'] is not None else '-'} | "
             f"{s['collect_like_ratio'] if s['collect_like_ratio'] is not None else '-'} | "
             f"{s['comment_like_ratio'] if s['comment_like_ratio'] is not None else '-'} | {small} | "
             f"{fmt[0]} {pct(fmt[1], s['n'])} | {hook[0]} {pct(hook[1], s['n'])} |"
@@ -268,6 +284,8 @@ def render(summaries: list[dict[str, Any]], kind: str) -> str:
                      + ("、".join(f"{k}({v})" for k, v in s["words"]) or "无重复词"))
         if s["top_note"]:
             lines.append(f"- 最高互动：《{s['top_note']['title']}》 {s['top_note']['interactive']} {s['top_note']['url']}")
+        if s["interactive_known_count"] < s["n"]:
+            lines.append(f"- 互动总数仅 {s['interactive_known_count']}/{s['n']} 条已知；缺失值未按 0 统计。")
         if s["n"] < 8:
             lines.append("- ⚠️ 样本 < 8 条，占比不可用作趋势判断，仅供定性参考。")
         lines.append("")
@@ -281,7 +299,7 @@ def render(summaries: list[dict[str, Any]], kind: str) -> str:
             only = ws - set.union(*[o for o2, o in zip(summaries, sets) if o2 is not s]) if len(sets) > 1 else ws
             lines.append(f"- 「{s['label']}」独有：" + ("、".join(sorted(only)) or "无"))
         lines.append("")
-    lines.append("> 口径提醒：互动数为各数据源入库/抓取时刻的快照；粉丝数仅红狐路线提供，怪壳路线该字段为空时显示「字段缺失」，不要估算。")
+    lines.append("> 口径提醒：互动数为各数据源入库/抓取时刻的快照；粉丝数缺失时显示「字段缺失」，小号占比以已知粉丝样本为分母；缺失互动字段不按 0 统计。")
     return "\n".join(lines)
 
 
