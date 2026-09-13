@@ -27,6 +27,8 @@ description: 小红书热点搜集与选题判断。按关键词/赛道拉取近
 
 ## 第 0 步：数据源探测与降级（每次执行前先做，不要假设 Key 存在）
 
+用户要求搜索小红书热点、爆款、热门笔记或赛道趋势时，**默认先走 RNote**，调用统一脚本时省略 `--provider` 即可。只有 RNote Key 缺失或 RNote 请求失败时，才按下表继续降级；不要因为同时配置了红狐 Key 而跳过 RNote。
+
 ```bash
 env | grep -E '^(RNOTE_API_KEY|REDFOX_API_KEY|SOCIALDATAX_API_KEY|GUAIKEI_API_TOKEN)=' | sed 's/=.*/=<set>/'
 ```

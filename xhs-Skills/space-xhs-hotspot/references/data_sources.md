@@ -1,6 +1,6 @@
 # 数据源路线手册
 
-四条 API 路线 + 一条零配置兜底。执行前先探测环境变量，取第一条可用的；报错则降级到下一条。
+四条 API 路线 + 一条零配置兜底。热点、爆款和赛道趋势搜索默认先调用 RNote；RNote Key 缺失或请求失败时，再按顺序降级到下一条。
 本文只记录在参考资料中**实际存在**的参数，未列出的参数不要臆造。
 
 ```bash
@@ -16,7 +16,7 @@ env | grep -E '^(RNOTE_API_KEY|REDFOX_API_KEY|SOCIALDATAX_API_KEY|GUAIKEI_API_TO
 ```bash
 export RNOTE_API_KEY=...  # 在 RNote 管理后台创建，仅配置在本地环境
 
-# 默认一周内，最多点赞排序；stdout 为兼容分析器的 items[] JSON
+# 默认 provider 就是 RNote，一周内、最多点赞排序；stdout 为兼容分析器的 items[] JSON
 python3 scripts/fetch_xhs_hot_articles.py --keyword "通勤穿搭" > a.json
 
 # 多页取样；脚本自动携带搜索会话，按 note ID 去重

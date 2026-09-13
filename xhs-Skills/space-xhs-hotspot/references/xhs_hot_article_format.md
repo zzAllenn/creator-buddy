@@ -6,7 +6,7 @@
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `--provider` | `auto` | 已配置 RNOTE_API_KEY 时选 RNote，否则红狐；可显式 rnote/redfox |
+| `--provider` | `rnote` | 默认固定使用 RNote；可显式 redfox，或用 auto 按已配置 Key 选择 |
 | `--keyword` | 必填 | RNote 非空单词组；红狐还支持空词全站榜/逗号多词 |
 | `--max-items` | 10 | JSON/HTML 最多输出条数 |
 | `--output-format` | json | json/html；stdout 始终为 JSON |

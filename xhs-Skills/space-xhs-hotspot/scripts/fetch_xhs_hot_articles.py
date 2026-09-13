@@ -150,7 +150,7 @@ def fetch_redfox_notes(keyword: str, debug: bool = False, max_retries: int = 3,
 
 
 def fetch_xhs_hot_notes(keyword, debug=False, max_retries=3, start_date=None,
-                        end_date=None, page_num=1, page_size=None, provider='auto',
+                        end_date=None, page_num=1, page_size=None, provider='rnote',
                         pages=1, sort_type=None, time_filter=None, note_type=None,
                         search_id='', search_session_id='', with_related=False):
     """按配置选择数据源，禁止静默忽略另一数据源不支持的筛选条件。"""
@@ -632,8 +632,8 @@ def main():
     parser.add_argument('--max-retries', type=int, default=3, 
                        help='仅红狐：最大重试次数（默认3次）；RNote 不自动重试')
     
-    parser.add_argument('--provider', choices=['auto', 'rnote', 'redfox'], default='auto',
-                        help='自动优先选已配置的 RNote，其次红狐；失败后由 skill 决定降级')
+    parser.add_argument('--provider', choices=['auto', 'rnote', 'redfox'], default='rnote',
+                        help='数据源（默认 RNote）；auto 按已配置 Key 选择，失败后由 skill 决定降级')
     parser.add_argument('--pages', type=int, default=1, help='RNote 连续取样页数，默认 1')
     parser.add_argument('--sort-type', choices=SORT_TYPES, help='RNote 默认最多点赞')
     parser.add_argument('--time-filter', choices=TIME_FILTERS, help='RNote 默认一周内')

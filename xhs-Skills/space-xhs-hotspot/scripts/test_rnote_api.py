@@ -137,14 +137,20 @@ class RNoteTests(unittest.TestCase):
         self.assertEqual(result['total'], 1)
         self.assertTrue(any('拓词请求失败' in w for w in result['warnings']))
 
-    def test_auto_selection_and_redfox_compatibility(self):
-        with patch.dict(os.environ, {'RNOTE_API_KEY': 'test-only-key'}), patch.object(
+    def test_rnote_is_default_and_redfox_stays_available(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(
                 cli, 'fetch_rnote_notes', return_value={'source': 'rnote'}) as fetch:
             self.assertEqual(cli.fetch_xhs_hot_notes('test')['source'], 'rnote')
             fetch.assert_called_once()
         with patch.object(cli, 'fetch_redfox_notes', return_value={'articles': []}) as fetch:
             self.assertEqual(cli.fetch_xhs_hot_notes('test', provider='redfox')['source'], 'redfox')
             self.assertEqual(fetch.call_args.args[-1], 50)
+
+    def test_auto_mode_remains_backward_compatible(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+                cli, 'fetch_redfox_notes', return_value={'articles': []}) as fetch:
+            self.assertEqual(cli.fetch_xhs_hot_notes('test', provider='auto')['source'], 'redfox')
+            fetch.assert_called_once()
 
     def test_unsupported_filters_fail_before_network(self):
         with patch.object(cli, 'fetch_rnote_notes') as fetch:
