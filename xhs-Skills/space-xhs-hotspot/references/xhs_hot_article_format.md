@@ -33,7 +33,7 @@
 | items 字段 | 说明 |
 |---|---|
 | noteId / title / desc | 笔记 ID、标题、摘要 |
-| noteLink | 原始完整笔记 URL；未提供时空串，不能自行通过 ID 拼接 |
+| noteLink | 原始完整 URL；RNote 没有现成 URL 时由 24 位 note ID 和原始 xsec_token 生成；缺少任一字段时为空 |
 | authorId / authorNickname / authorLink | 作者及主页 |
 | authorFans | 粉丝数，缺失为 null；红狐保留原模糊展示 |
 | createTime | 发布时间；RNote timestamp 秒值转为 UTC ISO 8601，其他时间字段保留原值；未返回时缺失，不从 ID 推断 |
@@ -49,4 +49,4 @@
 
 ## 接口依据
 
-[RNote OpenAPI](https://rnote.dev/openapi.json) 与 [文档](https://rnote.dev/docs)，核对日期 2026-09-12。已完成真实搜索联调，确认 `items[].note`、`user.userid`、秒级 `timestamp` 和 `images_list` 字段；实测有赞/藏/评/分享数，未返回粉丝数或完整笔记 URL。保留其他常见嵌套/扁平形态兼容。
+[RNote OpenAPI](https://rnote.dev/openapi.json) 与 [文档](https://rnote.dev/docs)，核对日期 2026-09-12。已完成真实搜索联调，确认 `items[].note`、`user.userid`、秒级 `timestamp`、`images_list` 和 `xsec_token` 字段；实测有赞/藏/评/分享数，未返回粉丝数或现成笔记 URL。适配器使用 ID 和 token 生成带 `xsec_source=pc_search` 的浏览器链接，并保留其他常见嵌套/扁平形态兼容。

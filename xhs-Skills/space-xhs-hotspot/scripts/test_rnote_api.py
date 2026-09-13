@@ -25,7 +25,8 @@ def page(items, next_page=None):
 class RNoteTests(unittest.TestCase):
     def test_live_note_shape(self):
         raw = {'model_type': 'note', 'note': {
-            'id': 'fixture-note', 'title': '测试笔记', 'desc': '测试摘要',
+            'id': '6aa12e500000000028031607', 'title': '测试笔记', 'desc': '测试摘要',
+            'xsec_token': 'fixture+/token=',
             'user': {'userid': 'fixture-author', 'nickname': '测试作者'},
             'timestamp': 1788948048,
             'images_list': [{'url': '', 'url_size_large': 'https://example.com/cover.jpg'}],
@@ -33,13 +34,20 @@ class RNoteTests(unittest.TestCase):
             'comments_count': 70, 'shared_count': 354,
         }}
         result = rnote_api.normalize_item(raw)
-        self.assertEqual(result['id'], 'fixture-note')
+        self.assertEqual(result['id'], '6aa12e500000000028031607')
         self.assertEqual(result['authorId'], 'fixture-author')
         self.assertEqual(result['interactiveCount'], 12577)
         self.assertEqual(result['createTime'], '2026-09-09T10:00:48+00:00')
         self.assertEqual(result['cover'], 'https://example.com/cover.jpg')
         self.assertIsNone(result['authorFans'])
-        self.assertEqual(result['shareInfoLink'], '')
+        self.assertEqual(
+            result['shareInfoLink'],
+            'https://www.xiaohongshu.com/explore/6aa12e500000000028031607'
+            '?xsec_token=fixture%2B%2Ftoken%3D&xsec_source=pc_search')
+
+    def test_note_url_requires_valid_id_and_token(self):
+        self.assertEqual(rnote_api.build_note_url('invalid', 'token'), '')
+        self.assertEqual(rnote_api.build_note_url('6aa12e500000000028031607', ''), '')
 
     def test_invalid_timestamp_is_missing(self):
         self.assertIsNone(rnote_api.publish_time({'timestamp': 1e100}))

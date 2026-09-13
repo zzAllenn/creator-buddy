@@ -40,9 +40,9 @@ python3 scripts/fetch_xhs_hot_articles.py --provider rnote --keyword "通勤穿�
 - 多词分别查询、分别落盘；逗号在 RNote 中只是关键词文本，不是批量搜索协议。
 - 无关键词的热点灵感接口 `creator/hot/inspiration/feed` 返回的是选题数组，不能直接当作笔记互动榜；当前脚本只接搜索及推荐词，空关键词明确拒绝。
 
-**输出与缺失字段**：读取 `data.data.items`，过滤推荐模块。2026-09-12 真实搜索确认笔记位于 `items[].note`：`user.userid` 为作者 ID，`timestamp` 为秒级发布时间，转换为 UTC ISO 8601；封面来自 `images_list[0]`。同时兼容 `note_card / noteCard` 和扁平字段；不识别的结构明确报错，不伪装成零样本。统一输出仍为 `items[]`，带 `source=rnote`、`timeFilter`、`sortType`、`pagesFetched`、`nextPage`、`searchId`、`searchSessionId`、`warnings`。`total` 是本次取样去重后的数量，不是全站命中数。
+**输出与缺失字段**：读取 `data.data.items`，过滤推荐模块。2026-09-12 真实搜索确认笔记位于 `items[].note`：`user.userid` 为作者 ID，`timestamp` 为秒级发布时间，转换为 UTC ISO 8601；封面来自 `images_list[0]`；`id + xsec_token` 用于生成浏览器笔记链接。同时兼容 `note_card / noteCard` 和扁平字段；不识别的结构明确报错，不伪装成零样本。统一输出仍为 `items[]`，带 `source=rnote`、`timeFilter`、`sortType`、`pagesFetched`、`nextPage`、`searchId`、`searchSessionId`、`warnings`。`total` 是本次取样去重后的数量，不是全站命中数。
 
-数值保留接口精度（`1.2万` 等近似字符串仍保留），缺失字段为 `null`；只有四类互动齐全且精确时才求和，否则总互动保留缺失。没有三维评分，不以 0 代替；粉丝数和发布时间缺失时不判断账号量级或时间趋势。完整 URL 原样保留；若接口仅返回 ID/token，`noteLink` 留空并告知链接缺失，不能臆造可访问链接。
+数值保留接口精度（`1.2万` 等近似字符串仍保留），缺失字段为 `null`；只有四类互动齐全且精确时才求和，否则总互动保留缺失。没有三维评分，不以 0 代替；粉丝数和发布时间缺失时不判断账号量级或时间趋势。完整 URL 原样保留；RNote 搜索卡片只有 `note.id` 和 `note.xsec_token` 时，适配器对 token 做 URL 编码并生成带 `xsec_source=pc_search` 的笔记链接。ID 或 token 缺失时才保留空链接。
 
 **错误与降级**：RNote 按请求计费，脚本不自动重试或切源（`--max-retries` 仅红狐使用）。401/403 检查 Key，402 检查余额，429/5xx 或网络故障按需重试；错误不回显原始响应或凭证。skill 在报错后按表选择下一条路线，并换用该路线支持的参数、声明实际数据源。仅有 RNote Key 时不能自动启用其他收费平台。
 

@@ -1,6 +1,7 @@
-"""RNote 搜索适配。标准库实现；缺失数据保留 None，不伪造评分或链接。"""
+"""RNote 搜索适配。缺失数据保留 None，不伪造评分或无 token 链接。"""
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -73,6 +74,19 @@ def publish_time(card):
         return None
 
 
+def build_note_url(note_id, xsec_token):
+    """把 RNote 搜索卡片中的 ID 和访问令牌转换为可打开的小红书链接。"""
+    note_id = str(note_id or '').strip()
+    xsec_token = str(xsec_token or '').strip()
+    if not re.fullmatch(r'[0-9a-f]{24}', note_id) or not xsec_token:
+        return ''
+    query = urllib.parse.urlencode({
+        'xsec_token': xsec_token,
+        'xsec_source': 'pc_search',
+    })
+    return f'https://www.xiaohongshu.com/explore/{note_id}?{query}'
+
+
 def normalize_item(item):
     if not isinstance(item, dict):
         return None
@@ -107,6 +121,10 @@ def normalize_item(item):
         cover_url = images[0].get('url_size_large') or images[0].get('url')
     link = first(item, 'note_url', 'noteLink', 'share_url', 'url')
     link = link or first(card, 'note_url', 'noteLink', 'share_url', 'url')
+    if not link:
+        xsec_token = first(item, 'xsec_token', 'xsecToken')
+        xsec_token = xsec_token or first(card, 'xsec_token', 'xsecToken')
+        link = build_note_url(note_id, xsec_token)
     return {
         'id': str(note_id), 'title': str(title), 'desc': card.get('desc') or '',
         'authorId': first(user, 'user_id', 'userId', 'userid', 'id') or '',
@@ -170,7 +188,7 @@ def fetch_rnote_notes(keyword, *, page_num=1, pages=1, sort_type='popularity_des
         except RuntimeError as exc:
             warnings.append(f'拓词请求失败，保留笔记结果：{exc}')
     if any(not n['shareInfoLink'] for n in items):
-        warnings.append('部分卡片未返回完整笔记 URL；noteLink 留空，不通过 ID 拼链接。')
+        warnings.append('部分卡片缺少有效的 note ID 或 xsec_token，无法生成笔记链接。')
     if any(n['interactiveCount'] is None for n in items):
         warnings.append('部分互动字段缺失，总互动数不可计算；按请求排序解读样本。')
     return {
